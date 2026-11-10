@@ -14,13 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Kokoro's G2P (measure/bench/requirements-kokoro.txt): misaki is in none of mlx-audio's extras, and
-# misaki[en] would pull torch for nothing; en_core_web_sm is installed from its wheel because spaCy's own
-# download falls back to a bare `uv pip install` that finds no venv.
 # Parakeet TDT 0.6B v3 on Apple Silicon (mlx). The adapter imports it only in load().
 parakeet = [
     "parakeet-mlx>=0.7.0",
 ]
+# Kokoro's G2P (measure/bench/requirements-kokoro.txt): misaki is in none of mlx-audio's extras, and
+# misaki[en] would pull torch for nothing; en_core_web_sm is installed from its wheel because spaCy's own
+# download falls back to a bare `uv pip install` that finds no venv.
 kokoro = [
     "misaki==0.9.4",
     "phonemizer>=3.3",
@@ -28,6 +28,15 @@ kokoro = [
     "num2words>=0.5.14",
     "spacy>=3.8,<3.9",
     "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
+# Piper ONNX voices (Russian and English). The adapter imports piper only in load().
+# espeak-ng is a system package, not a Python one (`brew install espeak-ng`).
+piper = [
+    "piper-tts>=1.2.0",
+]
+# Optional Silero TTS v5. torch.hub is the fallback when this package is absent.
+silero = [
+    "silero>=0.4.1",
 ]
 
 [dependency-groups]

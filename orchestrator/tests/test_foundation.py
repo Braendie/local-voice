@@ -19,8 +19,11 @@ def test_config_loads_and_names_models():
     assert cfg.stt.name == "parakeet_mlx" and cfg.stt.kind == "segmented"
     assert cfg.stt.settings["model"] == "mlx-community/parakeet-tdt-0.6b-v3"
     assert cfg.adapter("stt", "nemotron").kind == "streaming"
-    assert cfg.tts.name == "qwen3" and cfg.tts.settings["streaming_interval"] == 0.32
-    assert cfg.tts.settings["repetition_penalty"] >= 1.05
+    assert cfg.tts.name == "piper"
+    assert cfg.tts.settings["voices"] == {"ru": "ru_RU-irina-medium", "en": "en_US-lessac-medium"}
+    qwen = cfg.adapter("tts", "qwen3")
+    assert qwen.settings["streaming_interval"] == 0.32 and qwen.settings["repetition_penalty"] >= 1.05
+    assert cfg.adapter("tts", "silero").settings["model_id"] == "v5_ru"
     assert cfg.adapter("tts", "kokoro").impl.endswith(":KokoroEngine")
     assert set(cfg.hosts) <= {"127.0.0.1", "tailnet"} and cfg.port == 8770
     assert not any("film-rig" in str(p) for p in cfg.pi_extensions.values())
