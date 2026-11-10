@@ -34,8 +34,20 @@ hold:
   busy_notice: "The Mac is busy with a render right now. I'll answer as soon as it's done."
 
 stt:
-  adapter: nemotron
+  # parakeet_mlx: Parakeet TDT 0.6B v3, multilingual (Russian and English, language chosen by the
+  # model). nemotron stays available; it was measured as the low-latency English streaming default.
+  adapter: parakeet_mlx
   adapters:
+    parakeet_mlx:
+      # Per utterance (no live partials). parakeet-mlx 0.7, model mlx-community/parakeet-tdt-0.6b-v3.
+      # Do not set a language: v3 detects Russian and English. Needs the parakeet extra and a Mac.
+      impl: local_voice.engines.parakeet_mlx:ParakeetMLXEngine
+      kind: segmented
+      model: mlx-community/parakeet-tdt-0.6b-v3
+      trailing_silence_s: 0.3    # pad after the VAD stop so the last word is not clipped
+      context_left: 256          # transcribe_stream attention window, in frames
+      context_right: 256
+      ttfs_p99_s: 0.5
     nemotron:
       # Default ears: the live session returns the final transcript 53-54 ms after speech ends (measured).
       impl: local_voice.engines.nemotron:NemotronStreamingEngine

@@ -14,6 +14,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Parakeet TDT 0.6B v3 on Apple Silicon (mlx). The adapter imports it only in load().
+parakeet = [
+    "parakeet-mlx>=0.7.0",
+]
 # Kokoro's G2P (measure/bench/requirements-kokoro.txt): misaki is in none of mlx-audio's extras, and
 # misaki[en] would pull torch for nothing; en_core_web_sm is installed from its wheel because spaCy's own
 # download falls back to a bare `uv pip install` that finds no venv.
