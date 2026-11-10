@@ -27,7 +27,7 @@ Tailscale). An optional background "brain" reflects on the day's conversations w
 ## Contents
 
 - [What it does](#what-it-does) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Measurements](#measurements)
-- [Requirements](#requirements) · [Setup and usage](#setup-and-usage) · [Repository layout](#repository-layout)
+- [Requirements](#requirements) · [Setup and usage](#setup-and-usage) · [Настройка на MacBook Pro](#настройка-на-macbook-pro-m4-pro-48-гб) · [Repository layout](#repository-layout)
 - [Status and limitations](#status-and-limitations) · [Credits and licences](#credits-and-licences)
 
 ## What it does
@@ -264,6 +264,210 @@ Tests: `orchestrator/.venv/bin/python -m pytest -q` runs the model-free suite: f
 test hold gate. `pytest -m e2e tests/e2e` runs the real-model tests. In `clients/apple`, `./build.sh test` runs the
 Swift unit tests and `./build.sh e2e` runs the apps against the mock server. `brain/` and `tone/` have their own
 model-free suites.
+
+## Настройка на MacBook Pro (M4 Pro, 48 ГБ)
+
+Этот раздел — стек для разговоров на русском и английском на Apple silicon с 48 ГБ общей памяти.
+Речь и модель живут в одной памяти: Parakeet около 2,5 ГБ, Qwen3.5-35B-A3B 4-bit около 20 ГБ, контекст 32768
+оставляет запас системе. Piper считает на CPU и почти не занимает GPU.
+
+Ключи ниже появляются в трёх ветках поверх `main`: `feat/ru-asr-parakeet` (распознавание),
+`feat/ru-tts-piper` (голос), `feat/qwen35-llm` (модель и русские реплики). Меню-бар и подтверждение
+команд терминала уже есть в `main` и отдельных правок не требуют. Пока ветки не влиты, правьте
+`orchestrator/config.local.yaml` (он перекрывает `config.yaml` и не коммитится) теми же ключами.
+
+Проверено здесь без Mac и без Metal: юнит-тесты адаптеров, сборка `models.json` и русские формулировки.
+Загрузку весов, звук и реальный запрос к LM Studio нужно прогнать на машине. Список в конце раздела.
+
+### Что поставить один раз
+
+- Python 3.12, [`uv`](https://github.com/astral-sh/uv), `brew install espeak-ng` (без espeak-ng Piper молчит).
+- [Pi](https://github.com/badlogic/pi-mono) в `PATH` (`pi --version`). Голос ходит в модель через Pi.
+- LM Studio **или** Ollama. Оба отдают OpenAI-совместимый `/v1/chat/completions`.
+- Для меню-бара: Xcode и [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+```bash
+cd orchestrator
+uv sync --python 3.12 --extra parakeet --extra piper
+# по желанию, второй голос Silero v5:
+# uv sync --extra silero
+```
+
+`parakeet-mlx` и `piper-tts` ставятся только этими extras и импортируются, когда движок реально грузится.
+
+### Распознавание: Parakeet TDT 0.6B v3
+
+Модель `mlx-community/parakeet-tdt-0.6b-v3`, пакет `parakeet-mlx`. Она многоязычная и сама выбирает язык,
+поэтому в конфиге нет принудительного `language`: иначе русский режется. Путь сегментный: фраза уходит
+на распознавание после паузы, не пословно, как Nemotron. Nemotron остаётся в `stt.adapters.nemotron`.
+
+В `config.yaml` (после ветки распознавания):
+
+```yaml
+stt:
+  adapter: parakeet_mlx
+```
+
+Первый запуск скачает веса с Hugging Face. Дальше `run.sh` может работать с `HF_HUB_OFFLINE=1`, если
+снимок уже в кэше.
+
+### Голос: Piper, язык как у ответа
+
+Два голоса. Кириллица в ответе — русский, латиница — английский. Строка без букв остаётся на предыдущем языке
+(`default_lang: ru`). Piper medium даёт 22050 Гц, оркестратор передискретизирует в 24000 Гц, как ждёт протокол.
+
+```bash
+cd orchestrator
+python tools/download_piper_voices.py
+# кладёт в ../state/voices/piper (каталог state/ в git не входит):
+#   ru_RU-irina-medium, ru_RU-denis-medium, en_US-lessac-medium
+```
+
+По умолчанию Ирина и английский Lessac. Денис: в `tts.adapters.piper.voices.ru` поставить `ru_RU-denis-medium`.
+
+```yaml
+tts:
+  adapter: piper
+```
+
+**Silero v5, по желанию.** В конфиге уже есть адаптер `silero` (`model_id: v5_ru`, диктор `xenia`; более новый
+снимок — `v5_6_ru`, те же дикторы: aidar, baya, kseniya, xenia, eugene). Включение:
+
+```yaml
+tts:
+  adapter: silero
+```
+
+Первый вызов качает веса через пакет `silero` или `torch.hub` (`snakers4/silero-models`). Это русский голос.
+Английская фраза тоже идёт им, пока не заданы `en_model_id` и `en_speaker`. Для пары ru/en удобнее Piper.
+
+Qwen3-TTS и Kokoro из исходного репозитория остаются в `tts.adapters` и выбираются тем же ключом `tts.adapter`.
+
+### Модель: Qwen3.5-35B-A3B 4-bit
+
+Pi не вшивает адрес сервера. Секция `llm` в `config.yaml` собирает `models.json` при старте: имя модели,
+базовый URL, длина контекста, потолок ответа. Формат мышления `qwen-chat-template` плюс `enable_thinking: false`
+дают флаг `--thinking off`. Pi тогда шлёт `chat_template_kwargs.enable_thinking=false` (и `preserve_thinking`).
+Без явного `false` Qwen3.5 думает сам и первый звук приходит поздно, а вызовы инструментов тонут в рассуждении.
+`supportsStrictMode: false` и `max_tokens` (не `max_completion_tokens`) стоят специально для локального сервера,
+иначе инструменты часто отклоняются.
+
+```yaml
+llm:
+  provider: local
+  model: mlx-community/Qwen3.5-35B-A3B-4bit
+  base_url: http://127.0.0.1:1234/v1
+  context_length: 32768
+  max_tokens: 4096
+  enable_thinking: false
+  thinking_format: qwen-chat-template
+```
+
+В `spaces.yaml` идентификатор после `local/` — это поле `model` в запросе. Он должен совпасть с `llm.model`:
+
+```yaml
+defaults:
+  model: local/mlx-community/Qwen3.5-35B-A3B-4bit
+  deep_model: local/mlx-community/Qwen3.5-35B-A3B-4bit
+  thinking: off
+```
+
+**LM Studio.** Скачать `mlx-community/Qwen3.5-35B-A3B-4bit` (MLX, не GGUF). Developer / Local Server, порт 1234,
+совместимость с OpenAI. Длину контекста поставить 32768, ту же, что `llm.context_length`. Включить поддержку
+tool / function calls, если переключатель есть. Режим thinking в интерфейсе студии выключить: приложение и так
+шлёт `enable_thinking=false`, но включённый thinking в пресете модели его перебивает. Сервер слушает только
+localhost.
+
+**Ollama.** Тот же блок, другие два поля, и те же id в `spaces.yaml`:
+
+```bash
+ollama pull qwen3.5:35b
+```
+
+```yaml
+llm:
+  model: qwen3.5:35b
+  base_url: http://127.0.0.1:11434/v1
+```
+
+```yaml
+defaults:
+  model: local/qwen3.5:35b
+  deep_model: local/qwen3.5:35b
+```
+
+Если в логе сервера нет `chat_template_kwargs` или модель всё ещё пишет рассуждение до ответа, thinking не
+выключился. Для LM Studio это почти всегда пресет модели. Для Ollama проверьте, что клиент ходит в `/v1`,
+а не в родной `/api/chat`, и что в запросе уходит тот же `model`, что в `ollama list`.
+
+Проверка инструментов без голоса: спросить «покажи файлы в текущей папке». Должен появиться вызов `bash` или
+`ls`, и голос спросит разрешение. `rm`, сеть и составная команда не получают «разрешить до конца сессии»:
+каждый раз отдельное да. На русском вопрос звучит как «Запустить команду «…»? Она удаляет файлы.»
+
+Персона отвечает на языке реплики. «Домой», «перейди в журнал», «открой базу знаний», «режим действий»,
+«просто говори», «да» / «нет» понимает сам оркестратор, без модели. Пока человек говорит по-английски,
+короткие фразы оркестратора остаются английскими.
+
+### Меню-бар
+
+Уже собран. `clients/apple/macOS/LocalVoiceMacApp.swift` — `MenuBarExtra` с SF Symbol, значок меняется
+(микрофон, волна, пауза). В `project.yml` у `LocalVoiceMac` стоит `LSUIElement: true`, поэтому иконки в Dock нет.
+Горячая клавиша по умолчанию — удержание ⌥Space.
+
+```bash
+cd clients/apple && ./build.sh mac
+open build/DerivedData/Build/Products/Debug/LocalVoice.app
+```
+
+На машине проверить: значок в строке меню, по нажатию панель, ⌥Space записывает, в панели виден статус.
+Сборка только на Mac.
+
+### Команды терминала
+
+Уже есть. Инструмент `bash` у Pi, допуск решает `orchestrator/pi/voice_gate.ts`. В пространстве `home` уровень
+`ask`: любая команда спрашивает вслух и карточкой (кнопки Do it / Don't, на русском «Сделать» / «Не надо»).
+`rm`, `rmdir`, `trash` и `git rm` / `git clean` помечены как удаление: сессионного разрешения нет, вопрос
+говорит, что файлы будут удалены. Сеть (`curl`, `ssh`, `git push` и установка пакетов) тоже спрашивается каждый
+раз. Команда с `;`, пайпом или подстановкой не попадает в список «безопасных префиксов» и тоже спрашивается.
+Пространство `readonly` команды отказывает сразу.
+
+### Запуск
+
+Шлюз GPU (`hold.gate`, по умолчанию `127.0.0.1:8090`) можно не поднимать: если его нет, память считается свободной.
+На этой машине GPU занимает LM Studio, второй llama-swap на 8090 не нужен.
+
+```bash
+cd orchestrator
+./run.sh --check    # загрузить речь, прогреть, выйти
+./run.sh            # слушать 8770 и страницу на 7860
+```
+
+Браузер: <http://127.0.0.1:7860>. Наушники, иначе эхо собственного голоса (ограничение из основного README).
+Терминал: `.venv/bin/python -m local_voice.client --say "который час?"`.
+
+Свои URL и модель, не трогая файл в git:
+
+```yaml
+# orchestrator/config.local.yaml
+llm:
+  base_url: http://127.0.0.1:11434/v1
+  model: qwen3.5:35b
+  context_length: 32768
+```
+
+`spaces.yaml` при смене имени модели всё равно нужно поправить: id после `local/` уходит в запрос как есть.
+
+### Что проверить на Mac
+
+Здесь нет Metal, микрофона и LM Studio. После сборки:
+
+1. `uv sync --extra parakeet --extra piper`, скачать голоса Piper, один раз открыть Parakeet (первый `./run.sh --check` с сетью).
+2. Фраза по-русски и по-английски: в расшифровке своя письменность, не пустая строка и не транслит.
+3. Ответ по-русски говорит Ирина (или Денис), по-английски — Lessac. Смешанная фраза идёт за тем алфавитом, букв которого больше.
+4. В логе LM Studio или Ollama у запроса есть `chat_template_kwargs.enable_thinking: false`, до первого слова нет длинного reasoning.
+5. Просьба посмотреть каталог вызывает инструмент и останавливается на подтверждении. `rm` чего-нибудь безопасного в черновой папке не выполняется по «да» на предыдущую команду и прямо говорит про удаление.
+6. Иконка Local Voice в строке меню, панель открывается, ⌥Space слушает микрофон.
+7. Если Silero включали: `tts.adapter: silero`, первая загрузка `v5_ru`, фраза «Добрый день» звучит голосом xenia.
 
 ## Repository layout
 
