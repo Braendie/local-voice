@@ -4,9 +4,11 @@
 # skill dirs) or a list of names (spawned with --no-skills and one --skill <dir> each).
 version: 1
 defaults:
-  model: local/qwen38            # fast MoE: the live conversation (the voice brain test's pick)
-  deep_model: local/qwen27-262k  # slow dense model: long do-it-for-me tasks and reflection (needs the qwen chat-template compat)
-  thinking: off                  # reasoning off on the live path (it eats the reply budget; ds4 thinks HIGH without it)
+  # Qwen3.5-35B-A3B 4-bit. The id after local/ is the OpenAI `model` field (llm.model in config.yaml).
+  # Ollama: local/qwen3.5:35b, and set llm.model / llm.base_url to match.
+  model: local/mlx-community/Qwen3.5-35B-A3B-4bit
+  deep_model: local/mlx-community/Qwen3.5-35B-A3B-4bit
+  thinking: off                  # reasoning off on the live path; llm.enable_thinking false forces this anyway
   mode: conversation             # conversation | act
   tier: ask                      # readonly | ask | trusted
   voice: ryan                    # key into the TTS config
@@ -14,7 +16,8 @@ spaces:
   home:
     root: ~
     description: "your Mac"
-    triggers: ["home", "back home", "my mac", "the computer"]
+    description_ru: "ваш Mac"
+    triggers: ["home", "back home", "my mac", "the computer", "домой", "назад домой", "мой мак", "на компьютер"]
     skills: [wiki-query, web-research, chrome-read, reddit, x]
     tools: [read, grep, find, ls, kb]
     act_tools: [bash, write, edit]
@@ -22,7 +25,8 @@ spaces:
   atlas:
     root: ~/journal              # an Atlas-style markdown journal repo with an atlas.py CLI; point it at your own
     description: "your journal"
-    triggers: ["atlas", "journal", "my journal", "life wiki", "my notes"]
+    description_ru: "ваш журнал"
+    triggers: ["atlas", "journal", "my journal", "life wiki", "my notes", "журнал", "мой журнал", "заметки", "мои заметки"]
     skills: auto                 # the repo's own .agents/skills: atlas-journal, atlas-process, atlas-ask, atlas-review, atlas-file
     tools: [read, grep, find, ls, bash]        # bash in conversation mode too: capture runs through atlas.py
     act_tools: [write, edit]                   # agent pages go to inbox/; wiki/ only on "file that"
@@ -45,14 +49,16 @@ spaces:
   kb:
     root: ~/wiki                 # an optional knowledge base: a `kb` CLI over a markdown wiki
     description: "the knowledge base"
-    triggers: ["knowledge base", "the wiki"]
+    description_ru: "база знаний"
+    triggers: ["knowledge base", "the wiki", "база знаний", "базу знаний", "вики"]
     skills: [wiki-query]
     tools: [read, grep, find, ls, kb]
     tier: readonly
   voice:
     root: ~/repos/local-voice
     description: "this voice project"
-    triggers: ["voice project", "local voice"]
+    description_ru: "этот голосовой проект"
+    triggers: ["voice project", "local voice", "голосовой проект", "этот проект"]
     skills: auto
     tools: [read, grep, find, ls]
     tier: readonly

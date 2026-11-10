@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -48,6 +48,14 @@ class ApprovalSettings:
     session: str = "Okay. For the rest of this session I won't ask again about {label}."
     labels: dict[str, str] = field(default_factory=lambda: {
         "allow_once": "Do it", "allow_session": "Allow {label} for the rest of this session", "deny": "Don't"})
+    lang: str = "en"             # ru: the spoken question and the card buttons are Russian
+
+    def for_lang(self, lang: str) -> ApprovalSettings:
+        """The same waits, with Russian wording when the person has been speaking Russian."""
+        if lang != "ru" or self.lang == "ru":
+            return self
+        from .ru_lines import CARD
+        return replace(self, lang="ru", labels={**self.labels, **CARD})
 
     @property
     def longest_wait_s(self) -> float:
@@ -157,17 +165,54 @@ def _fill(template: str, a: Approval) -> str:
                                            label=(a.scope or {}).get("label", "this")))
 
 
+def ru_question(a: Approval) -> str:
+    """The question in Russian, from the action itself. The gate's summary is English."""
+    act = a.action or {}
+    tool = str(act.get("tool") or "")
+    if tool == "bash":
+        cmd = str(act.get("command") or a.message or "").split("\n", 1)[0].strip()
+        if len(cmd) > 80:
+            cmd = " ".join(cmd.split()[:4]) + "…"
+        tail = ""
+        if act.get("effect") == "delete":
+            tail = " Она удаляет файлы."
+        elif act.get("effect") == "network":
+            tail = " Она выходит в сеть."
+        return f"Запустить команду «{cmd}»?{tail}"
+    if tool in ("write", "edit"):
+        name = str(act.get("path") or "").rstrip("/").rsplit("/", 1)[-1] or "файл"
+        verb = "Записать" if tool == "write" else "Изменить"
+        return f"{verb} файл {name}?"
+    if a.summary:
+        return f"{a.summary} Сделать?"
+    return "Сделать это?"
+
+
 def spoken_question(a: Approval, s: ApprovalSettings) -> str:
+    if s.lang == "ru":
+        return ru_question(a)
     return _fill(s.ask, a)
 
 
 def spoken_again(a: Approval, s: ApprovalSettings) -> str:
+    if s.lang == "ru":
+        from .ru_lines import ASK_AGAIN
+        return ASK_AGAIN
     return _fill(s.ask_again, a)
 
 
 def spoken_outcome(a: Approval, s: ApprovalSettings, choice: str) -> str | None:
     """What the voice says once the question is answered: nothing for a plain yes (the tool runs and the model says how
     it went), what the session grant covers, or plainly what was not done."""
+    if s.lang == "ru":
+        from .ru_lines import DENIED, SESSION, TIMED_OUT
+        if choice == "allow_session" and a.scope:
+            return SESSION
+        if choice in ("deny", "deny_said"):
+            return DENIED
+        if choice == "timeout":
+            return TIMED_OUT
+        return None
     if choice == "allow_session" and a.scope:
         return _fill(s.session, a)
     if choice in ("deny", "deny_said"):
@@ -179,29 +224,35 @@ def spoken_outcome(a: Approval, s: ApprovalSettings, choice: str) -> str | None:
 
 # ------------------------------------------------------------------------------------------ the spoken answer
 
-_WORDS = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
+_WORDS = re.compile(r"[a-z0-9а-яё]+(?:'[a-z]+)?")
 YES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "all right", "fine", "please", "please do",
        "do it", "go ahead", "go for it", "absolutely", "of course", "affirmative", "correct", "yes please",
        "sure thing", "why not", "sounds good", "that's fine", "allow it", "allow", "approve", "approved", "confirm",
-       "confirmed", "proceed", "make it so"}
+       "confirmed", "proceed", "make it so",
+       "да", "давай", "хорошо", "конечно", "ага", "угу", "ладно", "можно", "сделай", "подтверждаю", "верно",
+       "да пожалуйста", "да давай", "да сделай"}
 NO = {"no", "nope", "nah", "never", "don't", "do not", "dont", "stop", "cancel", "never mind", "nevermind", "no thanks",
       "no thank you", "negative", "not now", "skip it", "leave it", "don't do it", "do not do it", "deny", "denied",
-      "please don't", "please do not", "please stop", "please cancel", "please no"}
+      "please don't", "please do not", "please stop", "please cancel", "please no",
+      "нет", "не надо", "не нужно", "отмена", "не делай", "откажи", "ни за что", "не сейчас", "нет спасибо"}
 HOLD = {"wait", "hold on", "hang on", "one sec", "one second", "just a second", "give me a second", "let me think",
-        "um", "uh", "hmm", "er", "erm", "mm"}
-DONT_ASK = ("don't ask me again", "don't ask again", "do not ask me again", "do not ask again")
+        "um", "uh", "hmm", "er", "erm", "mm", "подожди", "погоди", "секунду", "момент"}
+DONT_ASK = ("don't ask me again", "don't ask again", "do not ask me again", "do not ask again",
+            "больше не спрашивай", "не спрашивай больше")
 SESSION = ("for the rest of this session", "for the rest of the session", "for this session", "for the session",
-           "this session", *DONT_ASK, "from now on", "every time", "always")
+           "this session", *DONT_ASK, "from now on", "every time", "always",
+           "на эту сессию", "до конца сессии", "в этой сессии")
 # Words that only agree with, or point at, the thing asked about, after a yes ("yes, go ahead and add it"); any other
 # word makes the reply one of its own (deny_said), so "yes, but call it X" or "yes, in my inbox" never approves the
 # call as it stands. Kept short on purpose: a missing word costs one more question, an extra one could approve a change.
 AGREE = set("""please thanks thank you go ahead do it that that's this these those them one fine sure okay ok yes yeah
 yep yup sounds good great perfect right correct absolutely of course and now then just all alright it's is so for
 create write run make add save change changes edit file page note entry issue command proceed allow approve confirm
-i you can""".split())
+i you can да давай хорошо конечно ага угу ладно можно сделай это так пожалуйста верно подтверждаю выполни запусти
+ок окей делай""".split())
 # words that only refuse, after a no ("no, don't do it")
 REFUSE = set("""thanks thank you no not now don't do it please stop cancel that this never mind nope leave skip for
-the moment yet i dont""".split())
+the moment yet i dont нет не надо нужно отмена стоп хватит откажи пожалуйста сейчас спасибо""".split())
 
 
 def words(text: str) -> list[str]:

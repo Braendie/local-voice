@@ -21,8 +21,8 @@ from .pi_rpc import SpaceConfig
 TIERS = ("readonly", "ask", "trusted")
 MODES = ("conversation", "act")
 READ_TOOLS = ("read", "grep", "find", "ls")
-SPACE_KEYS = {"root", "description", "triggers", "skills", "extensions", "tools", "act_tools", "tier", "bash_allow",
-              "model", "thinking", "voice", "rules", "gpu_exclusive"}
+SPACE_KEYS = {"root", "description", "description_ru", "triggers", "skills", "extensions", "tools", "act_tools",
+              "tier", "bash_allow", "model", "thinking", "voice", "rules", "gpu_exclusive"}
 DEFAULT_KEYS = {"model", "deep_model", "thinking", "mode", "tier", "voice"}
 
 
@@ -35,6 +35,7 @@ class Space:
     name: str
     root: Path
     description: str
+    description_ru: str
     triggers: list[str]
     skills: str | list[str]
     skill_dirs: list[Path]
@@ -182,7 +183,8 @@ def load_spaces(cfg: Config, path: Path | None = None, *, check_paths: bool = Tr
         if not isinstance(gpu_exclusive, bool):
             raise SpacesError(f"{w}.gpu_exclusive must be true or false")
         out.spaces[name] = Space(
-            name=name, root=root, description=s["description"].strip(), triggers=triggers, skills=skills,
+            name=name, root=root, description=s["description"].strip(),
+            description_ru=str(s.get("description_ru") or "").strip(), triggers=triggers, skills=skills,
             skill_dirs=skill_dirs, extensions=exts, tools=tools, act_tools=act_tools, tier=tier,
             bash_allow=[list(p) for p in bash_allow_raw], model=str(s.get("model", defaults["model"])),
             thinking=str(_thinking(s.get("thinking", defaults["thinking"]))),
@@ -251,7 +253,9 @@ def pi_space_config(cfg: Config, space: Space, *, agent_dir: Path | None, state_
     env.update(cfg.pi_env)
     env.update(extra_env or {})
     return SpaceConfig(
-        name=space.name, root=space.root, model=space.model, thinking=space.thinking, tools=registered,
+        name=space.name, root=space.root, model=space.model,
+        thinking="off" if cfg.llm and cfg.llm.get("enable_thinking") is False else space.thinking,
+        tools=registered,
         skills=space.skills if space.skills == "auto" else [str(d) for d in space.skill_dirs],
         extensions=[str(e) for e in extensions], discover_extensions=False,
         session_dir=state_dir / "sessions" / space.name, session_name=f"voice-{space.name}",

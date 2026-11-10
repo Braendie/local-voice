@@ -6,10 +6,13 @@ from __future__ import annotations
 import re
 
 YES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "please", "please do", "do it", "go ahead", "go for it",
-       "absolutely", "of course", "affirmative", "correct", "yes please", "sure thing", "fine", "alright", "all right"}
+       "absolutely", "of course", "affirmative", "correct", "yes please", "sure thing", "fine", "alright", "all right",
+       "да", "давай", "хорошо", "конечно", "ага", "угу", "ладно", "можно", "сделай", "подтверждаю", "верно",
+       "да пожалуйста"}
 NO = {"no", "nope", "nah", "don't", "do not", "stop", "cancel", "never mind", "nevermind", "no thanks", "no thank you",
-      "negative", "not now", "skip it", "leave it", "wait"}
-_WORDS = re.compile(r"[a-z']+")
+      "negative", "not now", "skip it", "leave it", "wait",
+      "нет", "не надо", "не нужно", "отмена", "не делай", "откажи", "ни за что", "не сейчас"}
+_WORDS = re.compile(r"[a-zа-яё']+")
 
 # llama-swap streams its loading banner as reasoning_content while a model loads (14-20 s)
 LOADING_BANNER = "llama-swap loading model"

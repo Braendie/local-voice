@@ -95,10 +95,12 @@ def test_derived_agent_dir_reads_the_users_models_and_caps_tokens(tmp_path):
     d = derive_agent_dir(cfg, sp, tmp_path / "agent", base_url="http://127.0.0.1:1/v1")
     m = json.loads((d / "models.json").read_text())["providers"]["local"]
     assert m["baseUrl"] == "http://127.0.0.1:1/v1"
-    assert {x["id"] for x in m["models"]} == {"qwen38", "qwen27-262k"}
+    assert {x["id"] for x in m["models"]} == {cfg.llm["model"]}
+    assert m["models"][0]["contextWindow"] == cfg.llm["context_length"]
+    assert m["models"][0]["compat"]["thinkingFormat"] == "qwen-chat-template"
     assert all(x["maxTokens"] <= cfg.pi_max_tokens for x in m["models"])
     s = json.loads((d / "settings.json").read_text())
-    assert s == {"defaultProvider": "local", "defaultModel": "qwen38", "packages": []}
+    assert s == {"defaultProvider": "local", "defaultModel": cfg.llm["model"], "packages": []}
 
 
 @pytest.mark.parametrize("text,verdict", [

@@ -34,10 +34,13 @@ MIN_PART = 8    # a sentence cut at a clause break keeps at least this many word
 _LONG_ASK = re.compile(r"\b(?:stor(?:y|ies)|poem|in (?:more )?detail|detailed|tell me (?:more|everything)|more about|"
                        r"go on|keep going|carry on|continue|read (?:me|it|out|that|them|the whole)|"
                        r"all of it|step by step|walk me through|a long|longer)\b", re.I)
+_LONG_ASK_RU = re.compile(r"(?:подробн|продолж|целиком|по шагам|длинн|сказк|стихотворен|расскажи всё|расскажи все)")
 
 
 def wants_more(text: str) -> bool:
     """The person asked for a long answer, or for more of the last one."""
+    if _LONG_ASK_RU.search(text or ""):
+        return True
     return bool(_LONG_ASK.search(text or ""))
 
 

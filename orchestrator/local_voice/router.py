@@ -26,7 +26,7 @@ from .spaces import Spaces
 
 # What people say before the verb: fillers, and request phrases (Nemotron writes a spoken "I'd like you to" as "I like
 # you to"). Only a verb or a trigger alone makes a switch; these never do on their own.
-_FILLER = r"(?:um|uh|er|erm|hmm|well|so|okay|ok|alright|right|now|and|hey|please|just|actually)"
+_FILLER = r"(?:um|uh|er|erm|hmm|well|so|okay|ok|alright|right|now|and|hey|please|just|actually|ну|эм|так|ладно|пожалуйста)"
 _REQUEST = (r"(?:can you|could you|would you|will you|can we|could we|let's|let us|i'd like you to|i would like you to|"
             r"i like you to|i want you to|i need you to|i'd like to|i would like to|i like to|i want to|i wanna|i need to|"
             r"we need to|we should|time to|go ahead and)")
@@ -34,7 +34,8 @@ _PRE = rf"(?:(?:{_FILLER}|{_REQUEST})\s+)*"
 _VERB = (r"(?:go(?:\s+back)?\s+(?:to|into)|go\s+back|go|switch(?:\s+(?:back|over))?\s+(?:to|into)|switch|"
          r"move(?:\s+back)?\s+(?:to|into)|head(?:\s+(?:back|over))?\s+(?:to|into)|jump(?:\s+back)?\s+(?:to|into)|"
          r"take\s+me(?:\s+back)?(?:\s+(?:to|into))?|bring\s+me(?:\s+back)?\s+(?:to|into)|back\s+to|over\s+to|"
-         r"open(?:\s+up)?|bring\s+up|pull\s+up|enter)")
+         r"open(?:\s+up)?|bring\s+up|pull\s+up|enter|"
+         r"перейди(?:\s+(?:в|на))?|открой|вернись(?:\s+(?:в|на))?|переключись(?:\s+на)?)")
 # A word that, right after a trigger, makes the trigger part of a longer name: "my atlas folder", "the journal entry",
 # "my notes app", "the wiki page" are things in a space (or elsewhere), not the space.
 _NAME_GOES_ON = frozenset("""folder folders file files entry entries page pages app apps application directory dir
@@ -44,11 +45,16 @@ _SEP = r"[\s,.;:!?-]*"
 _ACT = re.compile(r"^(?:(?:ok(?:ay)?|so|now|please)\s+)*(?:switch\s+to\s+|go\s+to\s+|use\s+)?act(?:ion)?\s+mode$")
 _TALK = re.compile(r"^(?:(?:ok(?:ay)?|so|now|please|let's)\s+)*(?:(?:switch\s+to\s+|go\s+to\s+|back\s+to\s+)?"
                    r"(?:conversation|talk|chat)\s+mode|just\s+(?:talk|chat)|let's\s+just\s+(?:talk|chat))$")
-_COURTESY = {"", "please", "now", "then", "thanks", "thank you", "for me", "please thanks"}
-_NOTE = re.compile(r"^\s*(?:(?:ok(?:ay)?|so|please)[\s,]+)*(?:note|journal|jot\s+down|write\s+down)\s+this\b[\s,.;:!?-]*",
+_COURTESY = {"", "please", "now", "then", "thanks", "thank you", "for me", "please thanks", "пожалуйста"}
+_NOTE = re.compile(r"^\s*(?:(?:ok(?:ay)?|so|please|ну|так)[\s,]+)*(?:note|journal|jot\s+down|write\s+down)\s+this\b[\s,.;:!?-]*"
+                   r"|^\s*(?:(?:ну|так|пожалуйста)[\s,]+)*(?:запиши|запомни)\s+это\b[\s,.;:!?-]*",
                    re.IGNORECASE)
 _NOTES_ON = re.compile(r"^(?:(?:ok(?:ay)?|so|now|please)\s+)*(?:just\s+)?(?:take|taking)\s+notes$")
 _NOTES_OFF = re.compile(r"^(?:(?:ok(?:ay)?|so|now|please)\s+)*(?:stop|done|finish(?:ed)?)\s+(?:taking\s+)?notes$")
+_ACT_RU = re.compile(r"^(?:(?:ну|так|ладно|пожалуйста)\s+)*(?:режим действий|режим правок)$")
+_TALK_RU = re.compile(r"^(?:(?:ну|так|ладно|пожалуйста)\s+)*(?:режим разговора|просто говори|просто поговорим|только разговор)$")
+_NOTES_ON_RU = re.compile(r"^(?:(?:ну|так|пожалуйста)\s+)*записывай(?:\s+заметки)?$")
+_NOTES_OFF_RU = re.compile(r"^(?:(?:ну|так|пожалуйста)\s+)*(?:хватит записывать|стоп заметки)$")
 
 
 def norm(text: str) -> str:
@@ -84,13 +90,13 @@ def route(text: str, spaces: Spaces) -> Route:
     n = norm(text)
     if not n:
         return Route("none")
-    if _ACT.match(n):
+    if _ACT.match(n) or _ACT_RU.match(n):
         return Route("mode", mode="act")
-    if _TALK.match(n):
+    if _TALK.match(n) or _TALK_RU.match(n):
         return Route("mode", mode="conversation")
-    if _NOTES_ON.match(n):
+    if _NOTES_ON.match(n) or _NOTES_ON_RU.match(n):
         return Route("notes_on")
-    if _NOTES_OFF.match(n):
+    if _NOTES_OFF.match(n) or _NOTES_OFF_RU.match(n):
         return Route("notes_off")
     index = _trigger_index(spaces)
     alts = "|".join(re.escape(t) for t, _ in index)
