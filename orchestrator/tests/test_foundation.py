@@ -16,7 +16,9 @@ from local_voice.mlx_worker import GpuHeldError, MLXWorker
 
 def test_config_loads_and_names_models():
     cfg = load_config()
-    assert cfg.stt.name == "nemotron" and cfg.stt.kind == "streaming"
+    assert cfg.stt.name == "parakeet_mlx" and cfg.stt.kind == "segmented"
+    assert cfg.stt.settings["model"] == "mlx-community/parakeet-tdt-0.6b-v3"
+    assert cfg.adapter("stt", "nemotron").kind == "streaming"
     assert cfg.tts.name == "qwen3" and cfg.tts.settings["streaming_interval"] == 0.32
     assert cfg.tts.settings["repetition_penalty"] >= 1.05
     assert cfg.adapter("tts", "kokoro").impl.endswith(":KokoroEngine")
