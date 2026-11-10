@@ -211,6 +211,9 @@ def persona_text(cfg: Config, space: Space) -> str:
     base = cfg.persona_file.read_text(encoding="utf-8").strip()
     if space.rules:
         base += "\n\n" + "\n".join(space.rules)
+    extra = ((cfg.llm or {}).get("prompt_extra") or "").strip()
+    if extra:   # a smaller model only; the default 35B block leaves this empty, so its prompt is unchanged
+        base += "\n\n" + extra
     hint = hint_instruction(cfg)   # tone `on` only (../tone/README.md), so the prompt cache is unchanged otherwise
     if hint:
         base += "\n\n" + hint
@@ -252,8 +255,10 @@ def pi_space_config(cfg: Config, space: Space, *, agent_dir: Path | None, state_
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
     env.update(cfg.pi_env)
     env.update(extra_env or {})
+    from .agent_dir import model_ref
+
     return SpaceConfig(
-        name=space.name, root=space.root, model=space.model,
+        name=space.name, root=space.root, model=model_ref(cfg, space.model),
         thinking="off" if cfg.llm and cfg.llm.get("enable_thinking") is False else space.thinking,
         tools=registered,
         skills=space.skills if space.skills == "auto" else [str(d) for d in space.skill_dirs],

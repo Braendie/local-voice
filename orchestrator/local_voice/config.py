@@ -275,12 +275,28 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
 
 
 def _llm(raw: dict) -> dict[str, Any] | None:
-    """llm: the OpenAI-compatible server Pi calls. Missing means "read models.json only", the previous behaviour."""
+    """llm: the OpenAI-compatible server Pi calls. Missing means "read models.json only", the previous behaviour.
+
+    ``llm.preset`` names an entry of ``llm_presets``. The preset replaces this block (model, URL, context,
+    thinking), so the shipped 35B block stays the default until a preset is selected. Keys merged into that
+    preset from a local file (a different Ollama tag, another base URL) still apply.
+    """
     block = raw.get("llm", None)
     if block is None:
         return None
     if not isinstance(block, dict):
         raise ConfigError("llm must be a mapping")
+    preset_name = block.get("preset", None)
+    if preset_name in ("", None, False):
+        preset_name = None
+    elif not isinstance(preset_name, str):
+        raise ConfigError(f"llm.preset must be a name or null, got {preset_name!r}")
+    if preset_name:
+        presets = raw.get("llm_presets") or {}
+        if not isinstance(presets, dict) or preset_name not in presets or not isinstance(presets[preset_name], dict):
+            known = ", ".join(sorted(presets)) if isinstance(presets, dict) else ""
+            raise ConfigError(f"llm.preset {preset_name!r} is not in llm_presets ({known})")
+        block = dict(presets[preset_name])
     model = str(block.get("model") or "").strip()
     base = str(block.get("base_url") or "").strip().rstrip("/")
     if not model:
@@ -302,9 +318,13 @@ def _llm(raw: dict) -> dict[str, Any] | None:
     provider = str(block.get("provider") or "local").strip()
     if not provider or "/" in provider:
         raise ConfigError("llm.provider must be a name without a slash")
+    extra = block.get("prompt_extra") or ""
+    if not isinstance(extra, str):
+        raise ConfigError("llm prompt_extra must be a string")
     return {"provider": provider, "model": model, "name": str(block.get("name") or model), "base_url": base,
             "api_key": str(block.get("api_key") or "local-voice"), "context_length": context,
-            "max_tokens": max_tokens, "enable_thinking": thinking, "thinking_format": fmt}
+            "max_tokens": max_tokens, "enable_thinking": thinking, "thinking_format": fmt,
+            "preset": preset_name, "prompt_extra": extra.strip()}
 
 
 def _barge_in(raw: dict) -> dict[str, float]:

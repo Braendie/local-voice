@@ -18,13 +18,29 @@ from .spaces import Spaces
 GLOBAL_SKILLS = Path("~/.pi/agent/skills").expanduser()
 
 
-def models_in_use(spaces: Spaces) -> set[tuple[str, str]]:
+def models_in_use(spaces: Spaces, llm: dict | None = None) -> set[tuple[str, str]]:
+    """Model ids spaces name. An active preset serves every space on that provider, so spaces.yaml can keep
+    the default 35B id while Pi is pointed at the preset's model."""
+    preset = bool(llm and llm.get("preset"))
     out = set()
     for ref in [spaces.defaults.get("model"), spaces.defaults.get("deep_model"), *[s.model for s in spaces.spaces.values()]]:
         if ref and "/" in str(ref):
             prov, _, mid = str(ref).partition("/")
-            out.add((prov, mid))
+            if preset and prov == llm["provider"]:
+                out.add((prov, llm["model"]))
+            else:
+                out.add((prov, mid))
     return out
+
+
+def model_ref(cfg: Config, space_model: str) -> str:
+    """The provider/id Pi should load. A preset replaces ids on its own provider; anything else is unchanged."""
+    llm = cfg.llm
+    if llm and llm.get("preset") and "/" in str(space_model):
+        prov, _, _mid = str(space_model).partition("/")
+        if prov == llm["provider"]:
+            return f"{llm['provider']}/{llm['model']}"
+    return str(space_model)
 
 
 def llm_model_entry(llm: dict, max_tokens: int) -> dict:
@@ -77,7 +93,7 @@ def derive_agent_dir(cfg: Config, spaces: Spaces, dest: Path, *, base_url: str |
             raise ConfigError(f"pi.models_source {cfg.pi_models_source} is not valid JSON: {e}") from e
     elif llm is None:
         raise ConfigError(f"pi.models_source {cfg.pi_models_source} does not exist")
-    wanted = models_in_use(spaces)
+    wanted = models_in_use(spaces, llm)
     providers: dict[str, dict] = {}
     for prov, mid in sorted(wanted):
         if llm and prov == llm["provider"] and mid == llm["model"]:
@@ -107,10 +123,14 @@ def derive_agent_dir(cfg: Config, spaces: Spaces, dest: Path, *, base_url: str |
         m["maxTokens"] = min(int(m.get("maxTokens") or cfg.pi_max_tokens), cfg.pi_max_tokens)
         if not any(x.get("id") == m["id"] for x in entry["models"]):
             entry["models"].append(m)
-    default = str(spaces.defaults.get("model", "local/qwen38")).partition("/")
+    if llm and llm.get("preset"):
+        default_provider, default_model = llm["provider"], llm["model"]
+    else:
+        default = str(spaces.defaults.get("model", "local/qwen38")).partition("/")
+        default_provider, default_model = default[0], default[2]
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "models.json").write_text(json.dumps({"providers": providers}, indent=1) + "\n", encoding="utf-8")
-    (dest / "settings.json").write_text(json.dumps({"defaultProvider": default[0], "defaultModel": default[2],
+    (dest / "settings.json").write_text(json.dumps({"defaultProvider": default_provider, "defaultModel": default_model,
                                                     "packages": []}, indent=1) + "\n", encoding="utf-8")
     link = dest / "skills"
     if GLOBAL_SKILLS.is_dir() and not link.exists() and not link.is_symlink():
