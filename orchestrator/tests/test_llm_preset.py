@@ -89,6 +89,26 @@ def test_a_local_tag_override_wins_inside_the_preset(tmp_path):
     assert cfg.llm["base_url"] == "http://127.0.0.1:11434/v1"
 
 
+def test_the_shipped_9b_preset_is_ollama_q5_and_a_local_tag_can_replace_it():
+    cfg = load_config(overrides={"llm": {"preset": "qwen35-9b-q5"}})
+    assert cfg.llm["preset"] == "qwen35-9b-q5"
+    assert cfg.llm["model"] == "qwen3.5:9b-q5_K_M"
+    assert cfg.llm["base_url"] == "http://127.0.0.1:11434/v1"
+    assert cfg.llm["context_length"] == 16384
+    assert cfg.llm["max_tokens"] == 2048
+    assert cfg.llm["enable_thinking"] is False
+    assert cfg.llm["thinking_format"] == "qwen-chat-template"
+    assert "tool interface" in cfg.llm["prompt_extra"]
+    # The 35B block in the same file must not leak into the selected preset.
+    assert "35B" not in cfg.llm["model"]
+    alt = load_config(overrides={
+        "llm": {"preset": "qwen35-9b-q5"},
+        "llm_presets": {"qwen35-9b-q5": {"model": "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M"}},
+    })
+    assert alt.llm["model"] == "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M"
+    assert alt.llm["context_length"] == 16384 and alt.llm["base_url"] == "http://127.0.0.1:11434/v1"
+
+
 def test_an_unknown_preset_names_the_key():
     with pytest.raises(ConfigError, match="llm.preset"):
         load_config(overrides={"llm": {"preset": "no-such"}, "llm_presets": {}})

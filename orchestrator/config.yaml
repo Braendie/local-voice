@@ -353,11 +353,11 @@ agent:
       deny: "Don't"
 
 # The model Pi calls. LM Studio's OpenAI server is the default on this Mac (MLX, port 1234).
-# Ollama instead: model qwen3.5:35b, base_url http://127.0.0.1:11434/v1, and the same id after
-# local/ in spaces.yaml (defaults.model and defaults.deep_model). enable_thinking false forces
-# every space's Pi child to --thinking off. thinking_format qwen-chat-template is what makes Pi
-# send chat_template_kwargs.enable_thinking=false. Context 32768 leaves room for the speech
-# models on a 48 GB Mac; raise it here if you have the memory.
+# Leave this block as it is. Another machine is llm.preset in config.local.yaml (see llm_presets);
+# a preset replaces model, URL and context, and Pi is pointed at it even if spaces.yaml still names
+# the 35B id. enable_thinking false forces every space's Pi child to --thinking off.
+# thinking_format qwen-chat-template is what makes Pi send chat_template_kwargs.enable_thinking=false.
+# Context 32768 leaves room for the speech models on a 48 GB Mac; raise it here if you have the memory.
 llm:
   provider: local
   model: mlx-community/Qwen3.5-35B-A3B-4bit
@@ -368,6 +368,30 @@ llm:
   max_tokens: 4096
   enable_thinking: false
   thinking_format: qwen-chat-template
+
+# Not selected unless config.local.yaml sets `llm: {preset: qwen35-9b-q5}`.
+# Qwen3.5-9B Q5_K_M via Ollama. Weights are about 6-7 GB, so 16384 context is the fit for a 12 GB
+# GPU; raise context_length to 32768 only when several GB stay free after the model is loaded.
+# The tag is whatever `ollama list` shows. If the pull was the bartowski GGUF, override model to
+# hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M. Ollama does not read contextWindow: set num_ctx on
+# the server (OLLAMA_CONTEXT_LENGTH or a Modelfile PARAMETER num_ctx). prompt_extra is appended
+# only while this preset is selected; a 9B needs the shorter reply and a reminder to call tools.
+llm_presets:
+  qwen35-9b-q5:
+    provider: local
+    model: qwen3.5:9b-q5_K_M
+    name: Qwen3.5-9B Q5_K_M
+    base_url: http://127.0.0.1:11434/v1
+    api_key: ollama
+    context_length: 16384
+    max_tokens: 2048
+    enable_thinking: false
+    thinking_format: qwen-chat-template
+    prompt_extra: >-
+      You are a smaller local model on a 12 GB GPU. Keep every spoken reply to one short sentence
+      unless the person asks for more. Call tools only through the tool interface, never by writing
+      a command or a JSON blob in the reply. If you are unsure, say so in a few words instead of
+      inventing a tool call. Do not think in a hidden channel.
 
 pi:
   bin: pi
