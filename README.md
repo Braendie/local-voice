@@ -27,7 +27,7 @@ Tailscale). An optional background "brain" reflects on the day's conversations w
 ## Contents
 
 - [What it does](#what-it-does) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Measurements](#measurements)
-- [Requirements](#requirements) · [Setup and usage](#setup-and-usage) · [Настройка на MacBook Pro](#настройка-на-macbook-pro-m4-pro-48-гб) · [Repository layout](#repository-layout)
+- [Requirements](#requirements) · [Setup and usage](#setup-and-usage) · [Настройка на MacBook Pro](#настройка-на-macbook-pro-m4-pro-48-гб) · [Qwen3.5-9B на Windows](#qwen35-9b-q5_k_m-через-ollama-windows-rtx-3060-12-гб) · [Repository layout](#repository-layout)
 - [Status and limitations](#status-and-limitations) · [Credits and licences](#credits-and-licences)
 
 ## What it does
@@ -399,6 +399,77 @@ defaults:
 Если в логе сервера нет `chat_template_kwargs` или модель всё ещё пишет рассуждение до ответа, thinking не
 выключился. Для LM Studio это почти всегда пресет модели. Для Ollama проверьте, что клиент ходит в `/v1`,
 а не в родной `/api/chat`, и что в запросе уходит тот же `model`, что в `ollama list`.
+
+### Qwen3.5-9B Q5_K_M через Ollama (Windows, RTX 3060 12 ГБ)
+
+Дефолт репозитория не меняется: Mac с 48 ГБ по-прежнему ходит в LM Studio, `mlx-community/Qwen3.5-35B-A3B-4bit`.
+Машина с 12 ГБ видеопамяти этот вес не тянет. Для неё есть отдельный пресет `qwen35-9b-q5`, он не выбран,
+пока его не включат.
+
+На Windows с RTX 3060 живёт только модель. Меню-бар (`LocalVoice.app`), сборка Xcode и Parakeet через
+MLX — это macOS на Apple silicon. Голосовой сервер остаётся на Mac и зовёт Ollama по сети. На самом
+Windows-ПК из этого репозитория работает OpenAI-совместимый эндпоинт Ollama (`/v1/chat/completions`):
+его поднимает пресет, не голосовой клиент.
+
+Веса Q5_K_M у модели около 9B занимают примерно 6–7 ГБ. Пресет ставит контекст **16384**: вместе с
+кэшем внимания и запасом Windows это укладывается в 12 ГБ. **32768** имеет смысл только если после
+загрузки модели в `nvidia-smi` свободно ещё несколько гигабайт. `max_tokens` у пресета 2048: голосовой
+ответ короткий, длинный потолок на 9B зря занимает память. `enable_thinking: false` и
+`thinking_format: qwen-chat-template` те же, что у 35B: Pi шлёт
+`chat_template_kwargs.enable_thinking=false`. Для 9B это важнее: рассуждение съедает и задержку, и
+маленький контекст, и вызов инструмента. Пресет дописывает к персоне короткую добавку: один короткий
+ответ и инструменты только через tool interface, не текстом в реплике. Пока пресет выключен, эта
+добавка в промпт не попадает.
+
+`spaces.yaml` трогать не нужно. Пока выбран пресет, Pi для пространств провайдера `local` подставляет
+модель пресета, даже если в файле всё ещё id 35B.
+
+```bash
+# на Windows, в каталоге Ollama
+ollama pull qwen3.5:9b-q5_K_M
+# если такого тега нет, GGUF с Hugging Face:
+# ollama pull hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M
+```
+
+Имя в запросе должно совпасть с `ollama list`. Пресет ждёт `qwen3.5:9b-q5_K_M`. Второй тег длинный,
+со слэшами; его пишут в `config.local.yaml`, не в `spaces.yaml`.
+
+Ollama не читает `contextWindow` из `models.json`. Без своего `num_ctx` она часто держит 2048 или 4096
+и обрезает диалог с инструментами. Перед запуском сервера задайте длину, ту же, что в пресете:
+
+```bash
+set OLLAMA_CONTEXT_LENGTH=16384
+ollama serve
+```
+
+Либо Modelfile: `FROM qwen3.5:9b-q5_K_M` и `PARAMETER num_ctx 16384`, затем `ollama create qwen35-9b-q5 -f Modelfile`
+и это имя в `model`. Если модель всё ещё думает вслух, в том же Modelfile выключите think (у свежей
+Ollama это отдельный параметр, `chat_template_kwargs` она иногда игнорирует).
+
+Пресет указывает на `http://127.0.0.1:11434/v1` — это адрес Ollama на той же машине, где она запущена.
+Голосовой сервер на Mac до Windows по localhost не достучится. На Windows откройте порт наружу
+(`OLLAMA_HOST=0.0.0.0:11434`) и в локальном конфиге Mac подставьте LAN-адрес ПК. Включение пресета и,
+если нужно, другой тег или контекст:
+
+```yaml
+# orchestrator/config.local.yaml на Mac
+llm:
+  preset: qwen35-9b-q5
+llm_presets:
+  qwen35-9b-q5:
+    model: qwen3.5:9b-q5_K_M
+    base_url: http://192.168.1.20:11434/v1
+    context_length: 16384
+```
+
+Для тега bartowski замените только `model` на `hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M`.
+Остальные поля пресета (thinking, max_tokens, добавка к промпту) подмешиваются из `config.yaml`.
+
+Проверка с Windows: `curl http://127.0.0.1:11434/v1/models` показывает тот же id. С Mac тот же URL,
+но с LAN-адресом. Дальше обычный `./run.sh` на Mac. В логе запроса не должно быть длинного reasoning
+до первого слова, а просьба «покажи файлы в папке» должна дойти до инструмента и остановиться на
+подтверждении. 9B чаще 35B пишет команду текстом вместо tool call: добавка пресета это запрещает,
+но на машине это всё равно стоит услышать.
 
 Проверка инструментов без голоса: спросить «покажи файлы в текущей папке». Должен появиться вызов `bash` или
 `ls`, и голос спросит разрешение. `rm`, сеть и составная команда не получают «разрешить до конца сессии»:
