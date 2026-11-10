@@ -133,6 +133,7 @@ class Config:
     echo: dict[str, Any] = field(default_factory=dict)   # echo: (echo_guard.py, turn_start.py); empty when both are off
     tts_group: dict[str, Any] = field(default_factory=dict)   # tts.group (services/tts.py): min_words (0 = off), hold_s
     record: dict[str, Any] = field(default_factory=dict)      # record: (recorder.py): enabled, dir (a Path), max_minutes
+    llm: dict[str, Any] | None = None          # llm: OpenAI-compatible local model (model, base_url, context, thinking)
 
     def adapter(self, section: str, name: str) -> Adapter:
         """Another adapter of the same section (e.g. the Kokoro fallback), by name."""
@@ -269,7 +270,41 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
         echo=_echo(raw),
         tts_group=_tts_group(raw),
         record=_record(raw, base),
+        llm=_llm(raw),
     )
+
+
+def _llm(raw: dict) -> dict[str, Any] | None:
+    """llm: the OpenAI-compatible server Pi calls. Missing means "read models.json only", the previous behaviour."""
+    block = raw.get("llm", None)
+    if block is None:
+        return None
+    if not isinstance(block, dict):
+        raise ConfigError("llm must be a mapping")
+    model = str(block.get("model") or "").strip()
+    base = str(block.get("base_url") or "").strip().rstrip("/")
+    if not model:
+        raise ConfigError("llm.model is required")
+    if not base.startswith(("http://", "https://")):
+        raise ConfigError(f"llm.base_url must be an http(s) URL, got {base!r}")
+    context = block.get("context_length")
+    if isinstance(context, bool) or not isinstance(context, int) or not 1024 <= context <= 1_000_000:
+        raise ConfigError("llm.context_length must be an int from 1024 to 1000000")
+    max_tokens = block.get("max_tokens", 4096)
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 1 <= max_tokens <= 32768:
+        raise ConfigError("llm.max_tokens must be an int from 1 to 32768")
+    thinking = block.get("enable_thinking", False)
+    if not isinstance(thinking, bool):
+        raise ConfigError("llm.enable_thinking must be true or false")
+    fmt = str(block.get("thinking_format") or "qwen-chat-template")
+    if fmt not in ("qwen-chat-template", "qwen", "chat-template"):
+        raise ConfigError(f"llm.thinking_format must be qwen-chat-template, qwen or chat-template, got {fmt!r}")
+    provider = str(block.get("provider") or "local").strip()
+    if not provider or "/" in provider:
+        raise ConfigError("llm.provider must be a name without a slash")
+    return {"provider": provider, "model": model, "name": str(block.get("name") or model), "base_url": base,
+            "api_key": str(block.get("api_key") or "local-voice"), "context_length": context,
+            "max_tokens": max_tokens, "enable_thinking": thinking, "thinking_format": fmt}
 
 
 def _barge_in(raw: dict) -> dict[str, float]:
