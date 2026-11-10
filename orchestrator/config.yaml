@@ -70,7 +70,9 @@ stt:
       text: "what does my knowledge base say about the hold gate"
 
 tts:
-  adapter: qwen3
+  # piper: Russian (Irina) and English (Lessac) ONNX voices. The voice follows the reply's script.
+  # qwen3 remains available. silero is the optional Russian v5 backend (tts.adapter: silero).
+  adapter: piper
   trim_leading_silence: true     # first-chunk energy gate; Qwen3-TTS 1.7B starts with ~0.08 s of silence (measured)
   keep_before_onset_ms: 30
   # Short sentences said with the next one (services/tts.py; the rule is speech_text.group_sentences'): a sentence of
@@ -83,8 +85,35 @@ tts:
     min_words: 0                 # 0 = off: one generation per sentence, as before
     hold_s: 0.5                  # costs that much at most, only to a short sentence nothing followed
   adapters:
+    piper:
+      # Needs espeak-ng (`brew install espeak-ng`) and the onnx files from tools/download_piper_voices.py.
+      # ru_RU-denis-medium is the other Russian voice: set voices.ru to that name to use him.
+      impl: local_voice.engines.piper_tts:PiperTTSEngine
+      voice_dir: ../state/voices/piper
+      voices:
+        ru: ru_RU-irina-medium
+        en: en_US-lessac-medium
+      default_lang: ru          # a reply with no letters keeps this; Cyrillic selects ru, Latin selects en
+      sample_rate: 24000        # pipeline rate; Piper medium is 22050 Hz and is resampled
+      length_scale: 1.0
+      noise_scale: 0.667
+      noise_w_scale: 0.8
+      chunk_ms: 120
+    silero:
+      # Optional. tts.adapter: silero. v5_ru speakers: aidar, baya, kseniya, xenia, eugene.
+      # v5_6_ru is a newer drop-in model_id. English replies use this Russian voice unless en_model_id is set.
+      impl: local_voice.engines.silero_tts:SileroTTSEngine
+      model_id: v5_ru
+      speaker: xenia
+      language: ru
+      sample_rate: 24000
+      repo: snakers4/silero-models
+      default_lang: ru
+      en_model_id: ""
+      en_speaker: ""
+      en_language: en
     qwen3:
-      # Default voice: 103 ms to the first chunk at interval 0.32 (measured), honours instruct.
+      # Previous default voice: 103 ms to the first chunk at interval 0.32 (measured), honours instruct.
       impl: local_voice.engines.qwen3_tts:Qwen3TTSEngine
       model: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
       voice: Ryan

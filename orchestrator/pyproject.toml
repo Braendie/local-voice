@@ -25,6 +25,15 @@ kokoro = [
     "spacy>=3.8,<3.9",
     "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
+# Piper ONNX voices (Russian and English). The adapter imports piper only in load().
+# espeak-ng is a system package, not a Python one (`brew install espeak-ng`).
+piper = [
+    "piper-tts>=1.2.0",
+]
+# Optional Silero TTS v5. torch.hub is the fallback when this package is absent.
+silero = [
+    "silero>=0.4.1",
+]
 
 [dependency-groups]
 dev = [
