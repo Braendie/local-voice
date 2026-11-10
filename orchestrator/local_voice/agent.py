@@ -66,8 +66,10 @@ from .pi_rpc import (ConfirmRequest, Exited, InputRequest, MessageEnd, Notify, P
                      SelectRequest, Settled, SpaceConfig, SpacePool, Status, TextDelta, ThinkingDelta, ToolCallStarted,
                      ToolEnd, ToolStart)
 from .pi_rpc import atlas_capture_command, heredoc_body
+from .lang import text_lang
 from .protocol_v1 import ClientMessageFrame, ReplyTimeline, in_order, urgent
 from .router import answer_to_ask, musing, route
+from . import ru_lines
 from .services import store_settings
 from .spaces import MODES, READ_TOOLS, SPACE_SWITCH, Spaces, pi_space_config
 from .speech_text import LOADING_BANNER, yes_no
@@ -190,6 +192,7 @@ class _Confirm:
     question: str                    # as said aloud
     card: bool                       # this connection's client shows it as a card
     asked_at: float                  # monotonic
+    lang: str = "en"                 # the language the question was asked in
     clock: asyncio.Task | None = None
 
 
@@ -247,6 +250,7 @@ class PiAgentService(LLMService):
         self._bot_speaking = False
         self._user_speaking = False
         self._busy_since = time.monotonic()          # the last time anything happened (for the digest's idle wait)
+        self._heard_lang = "en"                      # switches to ru once the person speaks Russian
         self._spoke = asyncio.Event()
         self._played = asyncio.Event()
         self._digest_task: asyncio.Task | None = None
@@ -334,6 +338,7 @@ class PiAgentService(LLMService):
         started, self._speech_started_at = self._speech_started_at, None
         if not text:
             return
+        self._note_lang(text)
         if self._confirm is not None:
             await self._answer_by_voice(text)
             return
@@ -368,7 +373,7 @@ class PiAgentService(LLMService):
             # was quiet..." split in two in the e2e of 2026-10-05 16:18), and the model, prompted with the cue alone,
             # was then barged in on by the musing and captured it itself. The next utterance is the musing.
             self._note_next = True
-            await self._reply_alone(text, meta, "Go ahead.")
+            await self._reply_alone(text, meta, self._L("Go ahead.", ru_lines.GO_AHEAD))
             return True
         if self._ask_spaces is not None:
             candidates, self._ask_spaces = self._ask_spaces, None
@@ -382,19 +387,23 @@ class PiAgentService(LLMService):
             return True
         if r.kind == "ask":
             self._ask_spaces = r.candidates
-            descs = [hub.spaces[c].description for c in r.candidates]
-            await self._reply_alone(text, meta, f"Do you mean {' or '.join(descs)}?")
+            descs = [self._space_name(c) for c in r.candidates]
+            joiner = " или " if self._heard_lang == "ru" else " or "
+            question = ru_lines.WHICH.format(opts=joiner.join(descs)) if self._heard_lang == "ru" else f"Do you mean {joiner.join(descs)}?"
+            await self._reply_alone(text, meta, question)
             return True
         if r.kind == "mode":
             await self._switch_mode(r.mode, text, meta)
             return True
         if r.kind in ("notes_on", "notes_off"):
             if not hub.space_is_journal():
-                await self._reply_alone(text, meta, "I can only take notes in your journal. Say go to my journal first.")
+                await self._reply_alone(text, meta, self._L(
+                    "I can only take notes in your journal. Say go to my journal first.", ru_lines.NOTES_ONLY))
                 return True
             hub.journal = r.kind == "notes_on"
-            await self._reply_alone(text, meta, "Taking notes. I'll save everything you say until you say stop taking notes."
-                                    if hub.journal else "Stopped taking notes.")
+            await self._reply_alone(text, meta, self._L(
+                "Taking notes. I'll save everything you say until you say stop taking notes." if hub.journal else "Stopped taking notes.",
+                ru_lines.NOTES_ON if hub.journal else ru_lines.NOTES_OFF))
             return True
         return False
 
@@ -437,16 +446,17 @@ class PiAgentService(LLMService):
         if name not in hub.spaces:
             await self._ui({"t": "error", "code": "space_unknown", "message": f"no space {name!r}"})
             return False
-        desc = hub.spaces[name].description
+        desc = self._space_name(name)
         try:
             await hub.enter(name)
         except (PiError, OSError) as e:
             logger.error(f"{self}: cannot enter {name}: {e}")
             await self._ui({"t": "error", "code": "space_unavailable", "message": str(e)})
-            await self._reply_alone(text, meta, f"I can't open {desc} right now.")
+            await self._reply_alone(text, meta, self._L(f"I can't open {desc} right now.", ru_lines.CANT_OPEN.format(desc=desc)))
             return False
         await self._space_message()
-        line = f"Back on {desc}." if name == self._cfg.default_space else f"Switching to {desc}."
+        line = (self._L(f"Back on {desc}.", ru_lines.BACK.format(desc=desc)) if name == self._cfg.default_space
+                else self._L(f"Switching to {desc}.", ru_lines.SWITCH.format(desc=desc)))
         if rest:
             await self._say(line)
             await self.run_text(rest, meta)
@@ -466,8 +476,9 @@ class PiAgentService(LLMService):
             await self._ui({"t": "error", "code": "space_unavailable", "message": str(e)})
             return False
         await self._space_message()
-        await self._reply_alone(text, meta, "Act mode. I can change things now, and I'll ask before anything risky."
-                                if mode == "act" else "Back to just talking.")
+        await self._reply_alone(text, meta, self._L(
+            "Act mode. I can change things now, and I'll ask before anything risky." if mode == "act" else "Back to just talking.",
+            ru_lines.ACT if mode == "act" else ru_lines.TALK))
         return True
 
     async def run_text(self, text: str, meta: dict | None = None) -> None:
@@ -481,6 +492,7 @@ class PiAgentService(LLMService):
             # speech would. The interruption stops any audio still playing.
             await self.broadcast_interruption()
             await self._on_interruption(barge_in=not (meta or {}).get("system"))
+        self._note_lang(text)
         self._busy_since = time.monotonic()
         # the state belongs to the new task from this moment: a barge-in while it waits for a silent run cancels it
         st = self._turn_state = _TurnState()
@@ -587,6 +599,28 @@ class PiAgentService(LLMService):
             self._response_open = False
             await self.push_frame(LLMFullResponseEndFrame())
 
+    def _note_lang(self, text: str) -> None:
+        # A bare yes or no answers a question; it does not switch the conversation's language.
+        if self._confirm is not None and yes_no(text) is not None:
+            return
+        lang = text_lang(text)
+        if lang:
+            self._heard_lang = lang
+
+    def _L(self, en: str, ru: str) -> str:
+        return ru_lines.line(self._heard_lang, en, ru)
+
+    def _space_name(self, name: str) -> str:
+        space = self._hub.spaces[name]
+        if self._heard_lang == "ru" and space.description_ru:
+            return space.description_ru
+        return space.description
+
+    def _tool_label(self, name: str) -> str:
+        if self._heard_lang == "ru":
+            return ru_lines.LABELS.get(name, self._cfg.labels.get(name, name))
+        return self._cfg.labels.get(name, name)
+
     async def _say(self, text: str):
         await self._open_response()
         await self.push_frame(TTSSpeakFrame(text, append_to_context=False))
@@ -604,7 +638,7 @@ class PiAgentService(LLMService):
                 await self.push_frame(FlushSpeechFrame())
         if cap.cut and not self._last_cut:
             self._last_cut = True
-            offer = self._cfg.spoken_cap_offer
+            offer = ru_lines.OFFER if self._heard_lang == "ru" else self._cfg.spoken_cap_offer
             if entry is not None:
                 entry.reply_text = cap.spoken
             child.set_cut(cap.spoken, offer)
@@ -636,7 +670,7 @@ class PiAgentService(LLMService):
             child = await hub.child(space)
         except (PiError, OSError) as e:
             logger.error(f"{self}: the {space} agent did not start: {e}")
-            await self._say("Sorry, I couldn't start the agent.")
+            await self._say(self._L("Sorry, I couldn't start the agent.", ru_lines.SORRY))
             await self._close_response()
             return
         lock = hub.locks[space]
@@ -701,7 +735,7 @@ class PiAgentService(LLMService):
                 if first_text and not st.muted and self._confirm is None:
                     # never while a permission question waits for its answer: there the agent is not looking, and
                     # "Still looking." 8 s after the ack talked over the person's yes (M3 e2e, 2026-10-05 16:17)
-                    await self._say(cfg.progress_text)
+                    await self._say(self._L(cfg.progress_text, ru_lines.PROGRESS))
 
             async def say_ack(tool: str):
                 nonlocal acked, ack, progress
@@ -712,7 +746,8 @@ class PiAgentService(LLMService):
                 # "Let me check." after its "Let me check current prices." (2026-10-05)
                 ack = "model" if cap.spoken.strip() else "canned"
                 if ack == "canned":
-                    await self._say(cfg.acks.get(tool, cfg.acks.get("default", "One moment.")))
+                    await self._say(ru_lines.ACKS.get(tool, ru_lines.ACKS["default"]) if self._heard_lang == "ru"
+                                    else cfg.acks.get(tool, cfg.acks.get("default", "One moment.")))
                 if cfg.progress_after_s > 0 and cfg.progress_text:
                     progress = self.create_task(still_working(), name="agent_progress")
             try:
@@ -743,7 +778,7 @@ class PiAgentService(LLMService):
                     elif isinstance(ev, ThinkingDelta):
                         if LOADING_BANNER in ev.text and not loading_said and not st.muted:
                             loading_said = True
-                            await self._say(cfg.loading_notice)
+                            await self._say(self._L(cfg.loading_notice, ru_lines.LOADING))
                     elif isinstance(ev, ToolCallStarted):
                         if not st.muted:
                             await self._release(cap.boundary(), cap, entry, child)
@@ -752,9 +787,9 @@ class PiAgentService(LLMService):
                         record.tools.append(ev.name)
                         if entry is not None:
                             entry.tool_started(ev.name)
-                        hub.tool = {"name": ev.name, "label": cfg.labels.get(ev.name, ev.name), "since": time.time()}
-                        await self._ui({"t": "tool", "phase": "start", "name": ev.name,
-                                        "label": cfg.labels.get(ev.name, ev.name)})
+                        label = self._tool_label(ev.name)
+                        hub.tool = {"name": ev.name, "label": label, "since": time.time()}
+                        await self._ui({"t": "tool", "phase": "start", "name": ev.name, "label": label})
                         if self._ack_when(ev.name, space) == "now":
                             await say_ack(ev.name)
                     elif isinstance(ev, ToolStart):
@@ -833,7 +868,7 @@ class PiAgentService(LLMService):
                                 f"({st.chars} chars in all)")
                 elif not cancelled:
                     if settled and first_text and record.tools and cfg.no_answer_text and not st.declined:
-                        await self._say(cfg.no_answer_text)   # tools ran (or were refused) and nothing was said
+                        await self._say(self._L(cfg.no_answer_text, ru_lines.NO_ANSWER))   # tools ran and nothing was said
                     await self._close_response()
                     if self._ui_in_order is not None:   # after the reply's audio: the agent is listening again
                         await self.push_frame(self._ui_in_order({"t": "state", "v": "listening"}))
@@ -994,7 +1029,7 @@ class PiAgentService(LLMService):
         """Ask about one call: the card (confirm_request with the summary, the action and the choices) and the spoken
         question, then the clock. True when this session's grant for the same scope answered it at once instead."""
         hub = self._hub
-        s = hub.approvals
+        s = hub.approvals.for_lang(self._heard_lang)
         if self._confirm is not None:
             self._confirm_queue.append((a, child, space))   # tool calls run in parallel: one question at a time
             return False
@@ -1007,7 +1042,7 @@ class PiAgentService(LLMService):
         card = self._client in s.card_clients
         wait = s.card_wait_s if card else s.voice_wait_s
         c = _Confirm(id=a.id, child=child, approval=a, space=space, question=approvals.spoken_question(a, s),
-                     card=card, asked_at=time.monotonic())
+                     card=card, asked_at=time.monotonic(), lang=s.lang)
         self._confirm = c
         hub.approval = {"id": a.id, "space": space, "tool": a.tool, "summary": a.summary, "client": self._client,
                         "asked_at": now_local().isoformat(timespec="seconds"), "wait_s": wait}
@@ -1021,7 +1056,7 @@ class PiAgentService(LLMService):
         """PROTOCOL.md: with a card on screen, wait at least `card_wait_s` and ask once more aloud before giving up;
         without one, `voice_wait_s`. Never talk over the person, and never give up while they are still speaking (their
         answer may be in those words)."""
-        s = self._hub.approvals
+        s = self._hub.approvals.for_lang(c.lang)
         end = c.asked_at + wait
         if c.card and 0 < s.reask_after_s < wait:
             await asyncio.sleep(max(0.0, c.asked_at + s.reask_after_s - time.monotonic()))
@@ -1054,7 +1089,7 @@ class PiAgentService(LLMService):
             hub.grants.add(self._session_id, c.space, c.approval.scope)
         if choice not in approvals.ALLOW and self._turn_state is not None:
             self._turn_state.declined = True    # what was not done is said here, not "I couldn't find that quickly"
-        line = approvals.spoken_outcome(c.approval, hub.approvals, choice)
+        line = approvals.spoken_outcome(c.approval, hub.approvals.for_lang(c.lang), choice)
         if line:
             await self._say(line)
         if choice == "deny_said" and said:
@@ -1078,7 +1113,7 @@ class PiAgentService(LLMService):
 
     async def _answer_by_voice(self, text: str):
         c = self._confirm
-        s = self._hub.approvals
+        s = self._hub.approvals.for_lang(c.lang)
         choice = approvals.heard_answer(text, c.approval.options, f"{c.question} {approvals.spoken_again(c.approval, s)}")
         logger.info(f"{self}: spoken answer {text!r} -> {choice}")
         if choice is None:
